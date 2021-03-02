@@ -14,15 +14,11 @@ const vehicle_data = Ref{Any}(nothing)
 K() = sort!(collect(keys(vehicle_data[])))
 K(k) = vehicle_data[][k]
 
-const period_data = Ref{Any}(nothing)
-T() = period_data[]
-T(t) = period_data[][t]
-
 const demand_data = Ref{Any}(nothing)
 d() = demand_data[]
 d(i,t) = demand_data[][i,t]
 
-function extract!(path::String;distformula::String) #extract from excel
+function extract!(path::String;t::Int64,f::String) #extract from excel
     xf = XLSX.readxlsx(path) #READ WORKSHEET
     data = Dict{Symbol,DataFrame}() #DATAFRAME DICT
 
@@ -41,18 +37,13 @@ function extract!(path::String;distformula::String) #extract from excel
     end
 
     dist = JuMP.Containers.DenseAxisArray{Float64}(undef, keys(V), keys(V))
+    dist .= 999999999
     for i in keys(V), j in keys(V)
-        if distformula == "haversine"
-            if i != j
+        if i != j
+            if f == "haversine"
                 dist[i,j] = haversine([V[i].x,V[i].y],[V[j].x,V[j].y],6378.137)
-            else
-                dist[i,j] = 999999999
-            end
-        elseif distformula == "euclidean"
-            if i != j
+            else #if f == "euclidean"
                 dist[i,j] = euclidean([V[i].x,V[i].y],[V[j].x,V[j].y])
-            else
-                dist[i,j] = 999999999
             end
         end
     end
@@ -67,25 +58,15 @@ function extract!(path::String;distformula::String) #extract from excel
         )
     end
 
-    T = collect( #range from starting month for duration
-        range(
-            last(data[:periods].start),
-            length = last(data[:periods].T),
-            step = 1
-        )
-    )
-
     d = JuMP.Containers.DenseAxisArray(
-        Array{Float64}(data[:demands][:,string.(T)]), #dataset
-        Array{Int64}(data[:demands].point), #dims 1
-        T #dims 2
-    )
+        Array{Float64}(data[:demands][:,string.(t)]), #dataset
+        Array{Int64}(data[:demands].point)
+    ) #one dimension
 
     vertex_data[] = V
     distance_data[] = dist
     vehicle_data[] = K
-    period_data[] = T
     demand_data[] = d
 
-    return V,dist,K,T,d
+    return V,dist,K,d
 end
