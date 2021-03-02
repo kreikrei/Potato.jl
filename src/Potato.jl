@@ -12,7 +12,7 @@ include("core.jl")
 include("struct.jl")
 
 #struct
-export vtx,veh
+export vtx,veh,col
 
 #base
 export extract!
