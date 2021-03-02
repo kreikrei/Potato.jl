@@ -70,3 +70,23 @@ function extract!(path::String;t::Int64,f::String) #extract from excel
 
     return V,dist,K,d
 end
+
+function initStab()
+    slackCoeff = sl_C()
+    surpCoeff = su_C()
+    slackLim = abs.(d())
+    surpLim = abs.(d())
+
+    return stabilizer(slackCoeff,surpCoeff,slackLim,surpLim)
+end
+
+function root()
+    root = node(
+        uuid1(), uuid1(),
+        Vector{bound}(),Vector{col}(),
+        initStab(),
+        ["UNVISITED"]
+    )
+
+    return root
+end
