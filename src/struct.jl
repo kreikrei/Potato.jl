@@ -34,3 +34,14 @@ struct veh
     fp::Float64
     fd::Float64
 end
+
+struct col
+    #quantity
+    u::JuMP.Containers.DenseAxisArray
+    v::JuMP.Containers.DenseAxisArray
+    l::JuMP.Containers.DenseAxisArray
+
+    #decision
+    o::JuMP.Containers.DenseAxisArray
+    x::JuMP.Containers.DenseAxisArray
+end
