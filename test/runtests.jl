@@ -1,6 +1,2 @@
-using Potato
-using Test
-
-@testset "Potato.jl" begin
-    # Write your tests here.
-end
+using SafeTestsets
+@safetestset "Potato test" begin include("testsets.jl") end
