@@ -3,30 +3,16 @@
 # =========================================================================
 
 passes(i) = [k for k in K() if (i in K(k).cover)]
+s(key,R,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
+issinteger(val) = abs(round(val) - val) < 1e-8
 
 function Q(key,R)
-    if !isempty(key)
-        q = Vector{Vector{NamedTuple}}()
-        for seq in key
-            res = Vector{NamedTuple}()
-            for r in keys(R), k in passes(seq.i)
-                if getproperty(R[r][k],:u)[seq.i] >= seq.v
-                    push!(res,(r=r,k=k))
-                end
-            end
-            push!(q,res)
-        end
-        return reduce(intersect,q)
-    else
-        q = Vector{NamedTuple}()
-        for r in keys(R), k in K()
-            push!(q,(r=r,k=k))
-        end
-        return q
-    end
+    #column class extraction
 end
 
-s(key,R,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
+function separate(R,θ)
+    #separation of fractional column
+end
 
 const subproblems = Ref{Any}(nothing)
 callSub() = subproblems[]
@@ -61,20 +47,19 @@ function buildSub!(n::node)
             u[i] - v[i]
         ) #load balance
 
+        @constraint(sp, [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]) #XL
+
         @constraint(sp, [i = K(k).cover],
             sum(x[j,i] for j in K(k).cover) - sum(x[i,j] for j in K(k).cover) == 0
         ) #traversal
 
         @constraint(sp, [i = K(k).cover], v[i] <= K(k).Q * o[i]) #VZ
-        @constraint(sp, [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]) #XL
 
         @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" &&
-        issubset([p.i for p in last(f).S],K(k).cover), F)
-        lB = filter(f -> last(f).sense == ">=" &&
-        issubset([p.i for p in last(f).S],K(k).cover), F)
+        uB = filter(f -> last(f).sense == "<=", F)
+        lB = filter(f -> last(f).sense == ">=", F)
 
         @variable(sp, g[keys(uB)], Bin)
         @variable(sp, h[keys(lB)], Bin)
@@ -203,10 +188,8 @@ function sub(n::node,duals::dv)
         sp = callSub()[k]
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" &&
-        issubset([p.i for p in last(f).S],K(k).cover), F)
-        lB = filter(f -> last(f).sense == ">=" &&
-        issubset([p.i for p in last(f).S],K(k).cover), F)
+        uB = filter(f -> last(f).sense == "<=", F)
+        lB = filter(f -> last(f).sense == ">=", F)
 
         #ADD OBJECTIVE
         @objective(sp, Min,
@@ -268,7 +251,6 @@ function updateStab!(stab::stabilizer,param::Float64)
     for k in keys(stab.slLim)
         stab.slLim[k] = floor(param * stab.slLim[k])
     end
-
     for k in keys(stab.suLim)
         stab.suLim[k] = floor(param * stab.suLim[k])
     end

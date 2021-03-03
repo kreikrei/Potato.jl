@@ -62,8 +62,13 @@ struct β
     v::Int64
 end
 
+struct S
+    k::Int64
+    seq::Vector{β}
+end
+
 struct bound
-    S::Vector{β} #component bound sequence
+    S::S #component bound sequence
     sense::String #≳ or ≲
     κ::Int64 #value of aggregation
 end

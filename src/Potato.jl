@@ -5,6 +5,7 @@ using XLSX
 using DataFrames
 using Distances
 using UUIDs
+using Statistics
 
 include("struct.jl")
 include("settings.jl")
@@ -38,5 +39,6 @@ export sub,getCols
 export colGen
 export origin
 export Q,s
+export separate
 
 end
