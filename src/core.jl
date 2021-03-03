@@ -32,7 +32,35 @@ function Q(key::S,R::Dict) #key pasti adalah S
 end
 
 const vehicle_priority = Ref{Any}(nothing)
-k_priority() = vehicle_priority[]
+k_priority() = vehicle_priority[] #clear
+
+const vertex_priority = Ref{Any}(nothing)
+i_priority() = vertex_priority[] #clear
+
+function prioritize_vertex!()
+    #determine branching priorities
+    res = JuMP.Containers.DenseAxisArray{Float64}(undef,V())
+    res .= 0
+    for i in V()
+        slack = (V(i).START - d(i)) - V(i).MIN #after demand to min level
+        surplus = V(i).MAX - (V(i).START - d(i)) #after demand to max level
+        spare = min(slack,surplus)/(V(i).MAX - V(i).MIN)
+        res[i] = 1/abs(spare)
+    end
+    return vertex_priority[] = res
+end #clear
+
+function i_priority(cover)
+    if isa(cover,Int64)
+        return vertex_priority[][cover] #bentuknya DenseAxisArray
+    else
+        new = Dict()
+        for i in cover
+            new[i] = i_priority(i)
+        end
+        return new
+    end
+end
 
 function prioritize_vehicle!()
     cov = DataFrame(k=Int64[],cov=Int64[])
@@ -50,26 +78,29 @@ function find_branch(n::node)
     #iterate over k_priority()
     for k in k_priority()
         key = S(k,β[])
-        rec = separate(key,[],R,θ)
-        if !isempty(rec)
-            #select the last component with highest branching priority
+        rec = separate(key,K(k).cover,[],R,θ)
+        if !isempty(rec) #rec is a vector of S
+            lastcomp = [candidate.seq[end].i for candidate in rec]
+            to_collect = findmax(i_priority(lastcomp))[2]
+            to_return = filter(p -> p.seq[end].i == to_collect,rec)
+            return to_return[1]
         end
     end
 end
 
-function separate(Seq::S,record,R,θ)
-    F = fractional_column(Seq,R,θ) #eq has k and i_set
+function separate(Seq::S,cover,record,R,θ)
+    F = fractional_column(Seq,R,θ)
 
     if isempty(F)
         return record
     end
 
     found = false
-    for i in K(Seq.k).cover
-        v = find_separator(i,F)
-        key = S(Seq.k,β(i,v))
-        if f(key,R,θ) > 0
-            push!(record,key)
+    for i in cover
+        v = find_separator(i,F,R)
+        newSeq = S(Seq.k,β[β(i,v)])
+        if !issinteger(s(newSeq,R,θ)) > 0
+            push!(record,newSeq)
             found = true
         end
     end
@@ -77,45 +108,40 @@ function separate(Seq::S,record,R,θ)
         return record
     end
 
-    i✶ = findmax(branching_priority(Seq.k).data)[2] #i and k axes ordered
-    v = find_separator(i✶,k,R,θ)
-    key = S(Seq.k,β(i✶,v))
-    record = separate(key,record,R,θ)
+    i✶ = findmax(i_priority(cover))[2] #determine next highest priority
+
+    v = find_separator(i✶,F,R)
+    newSeq = S(Seq.k,β[β(i✶,v)]) #BUILD NEWSEQ
+
+    to_remove = findall(p -> p == i✶,cover)
+    splice!(cover,to_remove) #BUILDNEWCOVER
+
+    record = separate(newSeq,cover,record,R,θ)
     return record
 end
 
 function fractional_column(Seq::S,R::Dict,θ)
-    #find intersection of all fractional columns and columns in Seq
-end
-
-function find_separator(i::Int64,F)
-    #find the median of values encountered by u_i in fractional columns
-end
-
-const priority = Ref{Any}(nothing)
-branching_priority() = priority[]
-branching_priority(k) = priority[][:,k] #bentuknya DenseAxisArray
-branching_priority(i,k) = priority[][i,k] #bentuknya DenseAxisArray
-
-function prioritize!()
-    #determine branching priorities
-    res = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
-    res .= 0
-    for i in V(), k in K()
-        if i in K(k).cover
-            slack = V(i).START - d(i) - V(i).MIN #after demand to min level
-            surplus = V(i).MAX - V(i).START - d(i) #after demand to max level
-            spare = min(slack,surplus)/(V(i).MAX - V(i).MIN)
-            res[i,k] = 1/abs(spare)
-        else
-            res[i,k] = 0
+    F = Vector{NamedTuple}()
+    for r in θ.axes[1], k in θ.axes[2]
+        if !issinteger(θ[r,k])
+            push!(F,(r=r,k=k))
         end
     end
-    return priority[] = res
+
+    return intersect(F,Q(Seq,R))
+end
+
+function find_separator(i::Int64,F,R)
+    test = Vector{Int64}()
+    for f in F
+        push!(test,R[f.r][f.k].u[i])
+    end
+    unique!(test)
+
+    return ceil(median(test))
 end
 
 function f(key::S,R::Dict,θ)
-    #find fractionality of key (S)
     return sum(θ[q.r,q.k] - floor(θ[q.r,q.k]) for q in Q(key,R))
 end
 

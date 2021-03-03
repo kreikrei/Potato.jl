@@ -39,8 +39,11 @@ export sub,getCols
 export colGen
 export origin
 export Q,s,f
-export rioritize!,branching_priority
+export prioritize_vertex!,i_priority
 export prioritize_vehicle!,k_priority
+export fractional_column
+export find_branch
 export separate
+export find_separator
 
 end
