@@ -447,7 +447,12 @@ function colGen(n::node;maxCG::Float64,track::Bool)
     if n.status[end] == "NO_SOLUTION"
         println("NODE $(n.self) FAILED.")
     else
-        println("NODE $(n.self) FINISHED.")
+        if integerCheck(n)
+            push!(n.status,"INTEGER")
+            println("NODE $(n.self) INTEGER")
+        else
+            println("NODE $(n.self) FINISHED.")
+        end
     end
 
     return n
