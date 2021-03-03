@@ -53,8 +53,8 @@ struct dv
     ϵ::JuMP.Containers.DenseAxisArray
 
     #bounding constraints
-    ρ::JuMP.Containers.DenseAxisArray
-    σ::JuMP.Containers.DenseAxisArray
+    #ρ::JuMP.Containers.DenseAxisArray
+    #σ::JuMP.Containers.DenseAxisArray
 end
 
 struct β

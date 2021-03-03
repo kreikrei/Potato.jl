@@ -16,7 +16,7 @@ K(k) = vehicle_data[][k]
 
 const demand_data = Ref{Any}(nothing)
 d() = demand_data[]
-d(i,t) = demand_data[][i,t]
+d(i) = demand_data[][i]
 
 function extract!(path::String;t::Int64,f::String) #extract from excel
     xf = XLSX.readxlsx(path) #READ WORKSHEET

@@ -25,7 +25,7 @@ function buildSub!(n::node)
         @variable(sp, u[K(k).cover] >= 0, Int)
         @variable(sp, v[K(k).cover] >= 0, Int)
         @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int)
-        @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin)
+        @variable(sp, o[K(k).cover], Bin)
         @variable(sp, x[K(k).cover, K(k).cover], Bin)
 
         @constraint(sp,
@@ -59,9 +59,9 @@ function master(n::node)
     set_silent(mp)
 
     if solver_name(mp) == "Gurobi"
-        set_optimizer_attribute(sp,"MIPFocus",2)
-        set_optimizer_attribute(sp,"NodefileStart",0.5)
-        set_optimizer_attribute(sp, "NumericFocus",3)
+        set_optimizer_attribute(mp,"MIPFocus",2)
+        set_optimizer_attribute(mp,"NodefileStart",0.5)
+        set_optimizer_attribute(mp, "NumericFocus",3)
     end
 
     R = Dict(1:length(n.columns) .=> n.columns)
@@ -110,7 +110,7 @@ function master(n::node)
     )
 
     @constraint(mp, λ[i = V()],
-        V(i).START[i] + sum(R[r][k].u[i] * θ[r,k] for r in keys(R), k in passes(i)) +
+        V(i).START + sum(R[r][k].u[i] * θ[r,k] for r in keys(R), k in passes(i)) +
         slack[i] - surp[i] == sum(R[r][k].v[i] * θ[r,k] for r in keys(R), k in passes(i)) +
         d(i) + I[i]
     ) #inventory balance
@@ -126,4 +126,193 @@ function master(n::node)
     optimize!(mp)
 
     return mp
+end
+
+function getDuals(mp::Model)
+    λ = dual.(mp.obj_dict[:λ])
+    δ = dual.(mp.obj_dict[:δ])
+    ϵ = dual.(mp.obj_dict[:ϵ])
+
+    #ρ = dual.(mp.obj_dict[:ρ])
+    #σ = dual.(mp.obj_dict[:σ])
+
+    return dv(λ,δ,ϵ)#dv(λ,δ,ϵ,ρ,σ)
+end
+
+function sub(n::node,duals::dv)
+    @inbounds for k in K()
+        sp = callSub()[k]
+
+        #ADD OBJECTIVE
+        @objective(sp, Min,
+            sum(
+                dist(i,j) * (
+                    K(k).vx * sp.obj_dict[:x][i,j] +
+                    K(k).vl * sp.obj_dict[:l][i,j]
+                )
+                for i in K(k).cover, j in K(k).cover
+            ) +
+            sum(K(k).fd * sp.obj_dict[:u][i] for i in K(k).cover) +
+            sum(K(k).fp * sp.obj_dict[:o][i] for i in K(k).cover) -
+            sum(
+                (sp.obj_dict[:u][i] - sp.obj_dict[:v][i]) * duals.λ[i]
+                for i in K(k).cover
+            ) -
+            sum(sp.obj_dict[:o][i] * duals.δ[k,i] for i in K(k).cover) -
+            duals.ϵ[k]
+        )
+
+        optimize!(sp)
+        println("($k): $(objective_value(sp))")
+    end
+
+    return callSub()
+end
+
+function getCols(sp)
+    if isa(sp,Model)
+        u = value.(sp.obj_dict[:u])
+        v = value.(sp.obj_dict[:v])
+        l = value.(sp.obj_dict[:l])
+        o = value.(sp.obj_dict[:o])
+        x = value.(sp.obj_dict[:x])
+
+        return col(u,v,l,o,x)
+    elseif isa(sp,Dict)
+        new = Dict{Int64,col}()
+        for r in keys(sp)
+            new[r] = getCols(sp[r])
+        end
+
+        return new
+    end
+end
+
+function colvals()
+    collection = 0
+    for k in K()
+        collection += objective_value(callSub(k))
+    end
+
+    return sum(collection)
+end
+
+
+function updateStab!(stab::stabilizer,param::Float64)
+    for i in stab.slLim.axes[1]
+        stab.slLim[i] = param * stab.slLim[i]
+        if stab.slLim[i] < 1
+            stab.slLim[i] = 0
+        end
+    end
+
+    for i in stab.slLim.axes[1]
+        stab.suLim[i] = param * stab.suLim[i]
+        if stab.suLim[i] < 1
+            stab.suLim[i] = 0
+        end
+    end
+
+    return stab
+end
+
+checkStab(mp::Model) = sum(value.(mp.obj_dict[:slack])) + sum(value.(mp.obj_dict[:surp]))
+
+function colGen(n::node;maxCG::Float64,track::Bool)
+    terminate = false
+    iter = 0
+    buildSub!(n)
+
+    while !terminate
+        if iter < maxCG
+            mp = master(n)
+
+            if has_values(mp) && has_duals(mp)
+                if track #print master problem obj
+                    println("obj: $(objective_value(mp))")
+                end
+
+                duals = getDuals(mp)
+                sp = sub(n,duals)
+
+                if track #print subproblem price
+                    println("price: $(colvals())")
+                end
+
+                if isapprox(colvals(),0,atol = 1e-8) || colvals() > 0
+                    if isapprox(checkStab(mp),0,atol = 1e-8)
+                        terminate = true #action
+                        push!(n.status,"EVALUATED") #report
+                        if track
+                            println("EVALUATED")
+                        end
+                    else
+                        updateStab!(n.stab,0.5) #action
+                        push!(n.status,"STABILIZED") #report
+                        if track
+                            println("STABILIZED")
+                        end
+                    end
+                else
+                    push!(n.columns,getCols(sp)) #action
+                    push!(n.status,"ADD_COLUMN") #report
+                    if track
+                        println("ADD_COLUMN")
+                    end
+                end
+
+                iter += 1 #iteration update
+            else
+                terminate = true #action
+                push!(n.status,"NO_SOLUTION")
+                if track
+                    println("NO_SOLUTION")
+                end
+            end
+        else
+            terminate = true #action
+            push!(n.status,"EVALUATED") #report
+            if track
+                println("EVALUATED")
+            end
+        end
+    end
+
+    if n.status[end] == "NO_SOLUTION"
+        println("NODE $(n.self) FAILED.")
+    else
+        println("NODE $(n.self) FINISHED.")
+    end
+
+    return n
+end
+
+function origin(n::node)
+    o = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
+    u = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
+    v = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
+    x = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K())
+    l = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K())
+
+    o .= 0
+    u .= 0
+    v .= 0
+    l .= 0
+    x .= 0
+
+    R = Dict(1:length(n.columns) .=> n.columns)
+    θ = value.(master(n).obj_dict[:θ])
+
+    for k in K(), i in K(k).cover
+        o[i,k] = sum(R[r][k].o[i] * θ[r,k] for r in keys(R))
+        u[i,k] = sum(R[r][k].u[i] * θ[r,k] for r in keys(R))
+        v[i,k] = sum(R[r][k].v[i] * θ[r,k] for r in keys(R))
+    end
+
+    for k in K(), i in K(k).cover, j in K(k).cover
+        x[i,j,k] = sum(R[r][k].x[i,j] * θ[r,k] for r in keys(R))
+        l[i,j,k] = sum(R[r][k].l[i,j] * θ[r,k] for r in keys(R))
+    end
+
+    return col(u,v,l,o,x)
 end
