@@ -5,9 +5,9 @@ using XLSX
 using DataFrames
 using Distances
 
+include("struct.jl")
 include("base.jl")
 include("core.jl")
-include("struct.jl")
 
 #struct
 export vtx,veh,col,node,dv
