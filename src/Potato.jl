@@ -13,7 +13,7 @@ include("base.jl")
 include("core.jl")
 
 #struct
-export vtx,veh,col,node,dv,β,bound
+export vtx,veh,col,node,dv,β,bound,S
 
 #settings
 export set_optimizer!
@@ -38,7 +38,7 @@ export master,getDuals
 export sub,getCols
 export colGen
 export origin
-export Q,s
+export Q,s,f
 export separate
 
 end

@@ -6,12 +6,38 @@ passes(i) = [k for k in K() if (i in K(k).cover)]
 s(key,R,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
 issinteger(val) = abs(round(val) - val) < 1e-8
 
-function Q(key,R)
+function Q(key,R) #key pasti adalah S
+    if isempty(key.seq)
+        #if formnya S(k,β[])
+        q = Vector{NamedTuple}()
+        for r in keys(R)
+            push!(q,(r=r,k=key.k))
+        end
+        return q
+    else
+        #if formnya S(k,β[β(i,v),...])
+        q = Vector{Vector{NamedTuple}}()
+        for tes in key.seq
+            res = Vector{NamedTuple}()
+            for r in keys(R)
+                if R[r][key.k].u[tes.i] >= tes.v
+                    push!(res,(r=r,k=key.k))
+                end
+            end
+            push!(q,res) #add col each bound
+        end
+        return reduce(intersect,q)
+    end
     #column class extraction
 end
 
 function separate(R,θ)
     #separation of fractional column
+end
+
+function f(key,R,θ)
+    #find fractionality of key (S)
+    return sum(θ[q.r,q.k] - floor(θ[q.r,q.k]) for q in Q(key,R))
 end
 
 const subproblems = Ref{Any}(nothing)
@@ -41,25 +67,20 @@ function buildSub!(n::node)
         @constraint(sp,
             sum(u[i] for i in K(k).cover) - sum(v[i] for i in K(k).cover) == 0
         ) #all pickup delivered
-
         @constraint(sp, [i = K(k).cover],
             sum(l[j,i] for j in K(k).cover) - sum(l[i,j] for j in K(k).cover) ==
             u[i] - v[i]
         ) #load balance
-
         @constraint(sp, [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]) #XL
-
         @constraint(sp, [i = K(k).cover],
             sum(x[j,i] for j in K(k).cover) - sum(x[i,j] for j in K(k).cover) == 0
         ) #traversal
-
         @constraint(sp, [i = K(k).cover], v[i] <= K(k).Q * o[i]) #VZ
-
         @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=", F)
-        lB = filter(f -> last(f).sense == ">=", F)
+        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k, F) #k of S main di sini
+        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k, F) #k of S main di sini
 
         @variable(sp, g[keys(uB)], Bin)
         @variable(sp, h[keys(lB)], Bin)
@@ -67,16 +88,16 @@ function buildSub!(n::node)
         q = col(u,v,l,o,x)
 
         for j in keys(uB)
-            η = @variable(sp, [F[j].S], Bin)
-            @constraint(sp, g[j] >= 1 - sum((1 - η[e]) for e in F[j].S))
-            @constraint(sp, [e = F[j].S],
+            η = @variable(sp, [F[j].S.seq], Bin)
+            @constraint(sp, g[j] >= 1 - sum((1 - η[e]) for e in F[j].S.seq))
+            @constraint(sp, [e = F[j].S.seq],
             (K(k).Q - e.v + 1) * η[e] >= getproperty(q,:u)[e.i] - e.v + 1)
         end
 
         for j in keys(lB)
-            η = @variable(sp, [F[j].S], Bin)
-            @constraint(sp, [e = F[j].S], h[j] <= η[e])
-            @constraint(sp, [e = F[j].S],
+            η = @variable(sp, [F[j].S.seq], Bin)
+            @constraint(sp, [e = F[j].S.seq], h[j] <= η[e])
+            @constraint(sp, [e = F[j].S.seq],
             e.v * η[e] <= getproperty(q,:u)[e.i])
         end
 
@@ -164,8 +185,8 @@ function master(n::node)
     uB = filter(f -> last(f).sense == "<=",F)
     lB = filter(f -> last(f).sense == ">=",F)
 
-    @constraint(mp, ρ[j = keys(uB)], sum(θ[q.r,q.k] for q in Q(F[j].S,R)) <= F[j].κ)
-    @constraint(mp, σ[j = keys(lB)], sum(θ[q.r,q.k] for q in Q(F[j].S,R)) >= F[j].κ)
+    @constraint(mp, ρ[j = keys(uB)], s(F[j].S,R,θ) <= F[j].κ)
+    @constraint(mp, σ[j = keys(lB)], s(F[j].S,R,θ) >= F[j].κ)
 
     optimize!(mp)
 
@@ -188,8 +209,8 @@ function sub(n::node,duals::dv)
         sp = callSub()[k]
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=", F)
-        lB = filter(f -> last(f).sense == ">=", F)
+        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k, F) #k of S main di sini
+        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k, F) #k of S main di sini
 
         #ADD OBJECTIVE
         @objective(sp, Min,
