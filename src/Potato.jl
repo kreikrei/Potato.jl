@@ -46,4 +46,8 @@ export find_branch
 export separate
 export find_separator
 
+#search
+export leaf,traverse
+export createBranch
+
 end

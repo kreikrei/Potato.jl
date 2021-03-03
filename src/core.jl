@@ -72,9 +72,7 @@ function prioritize_vehicle!()
     return vehicle_priority[] = cov.k
 end
 
-function find_branch(n::node)
-    R = Dict(1:length(n.columns) .=> n.columns)
-    θ = value.(master(n).obj_dict[:θ])
+function find_branch(R,θ)
     #iterate over k_priority()
     for k in k_priority()
         key = S(k,β[])
