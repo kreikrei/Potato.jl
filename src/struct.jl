@@ -53,25 +53,17 @@ struct dv
     ϵ::JuMP.Containers.DenseAxisArray
 
     #bounding constraints
-    #ρ::JuMP.Containers.DenseAxisArray
-    #σ::JuMP.Containers.DenseAxisArray
+    ρ::JuMP.Containers.DenseAxisArray
+    σ::JuMP.Containers.DenseAxisArray
 end
 
 struct β
-    q::Symbol
     i::Int64
-    sense::Int64
     v::Int64
 end
 
-struct S
-    k::Int64
-    t::Int64
-    sequence::Vector{β}
-end
-
 struct bound
-    S::S #component bound sequence
+    S::Vector{β} #component bound sequence
     sense::String #≳ or ≲
     κ::Int64 #value of aggregation
 end
@@ -79,8 +71,8 @@ end
 struct stabilizer
     slCoeff::Float64
     suCoeff::Float64
-    slLim::JuMP.Containers.DenseAxisArray
-    suLim::JuMP.Containers.DenseAxisArray
+    slLim::Dict
+    suLim::Dict
 end
 
 struct node

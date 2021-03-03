@@ -74,8 +74,8 @@ end
 function initStab()
     slackCoeff = sl_C()
     surpCoeff = su_C()
-    slackLim = abs.(d())
-    surpLim = abs.(d())
+    slackLim = Dict(K() .=> [sum(K(k).BP[i] for i in K(k).cover) * K(k).Q for k in K()])
+    surpLim = Dict(K() .=> [sum(K(k).BP[i] for i in K(k).cover) * K(k).Q for k in K()])
 
     return stabilizer(slackCoeff,surpCoeff,slackLim,surpLim)
 end
@@ -87,6 +87,26 @@ function root()
         initStab(),
         ["UNVISITED"]
     )
+
+    #=R = Dict{Int64,col}()
+
+    for k in K()
+        o = JuMP.Containers.DenseAxisArray{Float64}(undef,K(k).cover)
+        u = JuMP.Containers.DenseAxisArray{Float64}(undef,K(k).cover)
+        v = JuMP.Containers.DenseAxisArray{Float64}(undef,K(k).cover)
+        x = JuMP.Containers.DenseAxisArray{Float64}(undef,K(k).cover,K(k).cover)
+        l = JuMP.Containers.DenseAxisArray{Float64}(undef,K(k).cover,K(k).cover)
+
+        o .= 0
+        u .= 0
+        v .= 0
+        l .= 0
+        x .= 0
+
+        R[k] = col(u,v,l,o,x)
+    end
+
+    push!(root.columns,R)=#
 
     return root
 end

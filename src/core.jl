@@ -4,6 +4,30 @@
 
 passes(i) = [k for k in K() if (i in K(k).cover)]
 
+function Q(key,R)
+    if !isempty(key)
+        q = Vector{Vector{NamedTuple}}()
+        for seq in key
+            res = Vector{NamedTuple}()
+            for r in keys(R), k in passes(seq.i)
+                if getproperty(R[r][k],:u)[seq.i] >= seq.v
+                    push!(res,(r=r,k=k))
+                end
+            end
+            push!(q,res)
+        end
+        return reduce(intersect,q)
+    else
+        q = Vector{NamedTuple}()
+        for r in keys(R), k in K()
+            push!(q,(r=r,k=k))
+        end
+        return q
+    end
+end
+
+s(key,R,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
+
 const subproblems = Ref{Any}(nothing)
 callSub() = subproblems[]
 callSub(k) = subproblems[][k]
@@ -25,7 +49,7 @@ function buildSub!(n::node)
         @variable(sp, u[K(k).cover] >= 0, Int)
         @variable(sp, v[K(k).cover] >= 0, Int)
         @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int)
-        @variable(sp, o[K(k).cover], Bin)
+        @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin)
         @variable(sp, x[K(k).cover, K(k).cover], Bin)
 
         @constraint(sp,
@@ -45,6 +69,31 @@ function buildSub!(n::node)
         @constraint(sp, [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]) #XL
 
         @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
+
+        F = Dict(1:length(n.bounds) .=> n.bounds)
+        uB = filter(f -> last(f).sense == "<=" &&
+        issubset([p.i for p in last(f).S],K(k).cover), F)
+        lB = filter(f -> last(f).sense == ">=" &&
+        issubset([p.i for p in last(f).S],K(k).cover), F)
+
+        @variable(sp, g[keys(uB)], Bin)
+        @variable(sp, h[keys(lB)], Bin)
+
+        q = col(u,v,l,o,x)
+
+        for j in keys(uB)
+            η = @variable(sp, [F[j].S], Bin)
+            @constraint(sp, g[j] >= 1 - sum((1 - η[e]) for e in F[j].S))
+            @constraint(sp, [e = F[j].S],
+            (K(k).Q - e.v + 1) * η[e] >= getproperty(q,:u)[e.i] - e.v + 1)
+        end
+
+        for j in keys(lB)
+            η = @variable(sp, [F[j].S], Bin)
+            @constraint(sp, [e = F[j].S], h[j] <= η[e])
+            @constraint(sp, [e = F[j].S],
+            e.v * η[e] <= getproperty(q,:u)[e.i])
+        end
 
         optimize!(sp)
 
@@ -71,8 +120,8 @@ function master(n::node)
     # ================================
     @variable(mp, θ[keys(R), K()] >= 0)
     @variable(mp, V(i).MIN <= I[i = V()] <= V(i).MAX)
-    @variable(mp, 0 <= slack[i = V()] <= n.stab.slLim[i])
-    @variable(mp, 0 <= surp[i = V()] <= n.stab.suLim[i])
+    @variable(mp, 0 <= slack[k = K(), i = K(k).cover] <= n.stab.slLim[k])
+    @variable(mp, 0 <= surp[k = K(), i = K(k).cover] <= n.stab.suLim[k])
 
     @objective(mp, Min,
         sum(
@@ -100,18 +149,21 @@ function master(n::node)
             for i in V()
         ) + #inventory costs
         sum(
-            n.stab.slCoeff * slack[i]
-            for i in V()
+            n.stab.slCoeff * slack[k,i]
+            for k in K(), i in K(k).cover
         ) - #stabilizer
         sum(
-            n.stab.suCoeff * surp[i]
-            for i in V()
+            n.stab.suCoeff * surp[k,i]
+            for k in K(), i in K(k).cover
         ) #stabilizer
     )
 
     @constraint(mp, λ[i = V()],
-        V(i).START + sum(R[r][k].u[i] * θ[r,k] for r in keys(R), k in passes(i)) +
-        slack[i] - surp[i] == sum(R[r][k].v[i] * θ[r,k] for r in keys(R), k in passes(i)) +
+        V(i).START +
+        sum(R[r][k].u[i] * θ[r,k] for r in keys(R), k in passes(i)) +
+        sum(slack[k,i] for k in passes(i))  ==
+        sum(R[r][k].v[i] * θ[r,k] for r in keys(R), k in passes(i)) +
+        sum(surp[k,i] for k in passes(i)) +
         d(i) + I[i]
     ) #inventory balance
 
@@ -123,6 +175,13 @@ function master(n::node)
         sum(θ[r,k] for r in keys(R)) <= sum(K(k).BP[i] for i in K(k).cover)
     ) #multiplicity
 
+    F = Dict(1:length(n.bounds) .=> n.bounds)
+    uB = filter(f -> last(f).sense == "<=",F)
+    lB = filter(f -> last(f).sense == ">=",F)
+
+    @constraint(mp, ρ[j = keys(uB)], sum(θ[q.r,q.k] for q in Q(F[j].S,R)) <= F[j].κ)
+    @constraint(mp, σ[j = keys(lB)], sum(θ[q.r,q.k] for q in Q(F[j].S,R)) >= F[j].κ)
+
     optimize!(mp)
 
     return mp
@@ -133,15 +192,21 @@ function getDuals(mp::Model)
     δ = dual.(mp.obj_dict[:δ])
     ϵ = dual.(mp.obj_dict[:ϵ])
 
-    #ρ = dual.(mp.obj_dict[:ρ])
-    #σ = dual.(mp.obj_dict[:σ])
+    ρ = dual.(mp.obj_dict[:ρ])
+    σ = dual.(mp.obj_dict[:σ])
 
-    return dv(λ,δ,ϵ)#dv(λ,δ,ϵ,ρ,σ)
+    return dv(λ,δ,ϵ,ρ,σ)
 end
 
 function sub(n::node,duals::dv)
     @inbounds for k in K()
         sp = callSub()[k]
+
+        F = Dict(1:length(n.bounds) .=> n.bounds)
+        uB = filter(f -> last(f).sense == "<=" &&
+        issubset([p.i for p in last(f).S],K(k).cover), F)
+        lB = filter(f -> last(f).sense == ">=" &&
+        issubset([p.i for p in last(f).S],K(k).cover), F)
 
         #ADD OBJECTIVE
         @objective(sp, Min,
@@ -159,11 +224,13 @@ function sub(n::node,duals::dv)
                 for i in K(k).cover
             ) -
             sum(sp.obj_dict[:o][i] * duals.δ[k,i] for i in K(k).cover) -
-            duals.ϵ[k]
+            duals.ϵ[k] -
+            sum(sp.obj_dict[:g][j] * duals.ρ[j] for j in keys(uB)) -
+            sum(sp.obj_dict[:h][j] * duals.σ[j] for j in keys(lB))
         )
 
         optimize!(sp)
-        println("($k): $(objective_value(sp))")
+        #println("($k): $(objective_value(sp))")
     end
 
     return callSub()
@@ -197,20 +264,13 @@ function colvals()
     return sum(collection)
 end
 
-
 function updateStab!(stab::stabilizer,param::Float64)
-    for i in stab.slLim.axes[1]
-        stab.slLim[i] = param * stab.slLim[i]
-        if stab.slLim[i] < 1
-            stab.slLim[i] = 0
-        end
+    for k in keys(stab.slLim)
+        stab.slLim[k] = floor(param * stab.slLim[k])
     end
 
-    for i in stab.slLim.axes[1]
-        stab.suLim[i] = param * stab.suLim[i]
-        if stab.suLim[i] < 1
-            stab.suLim[i] = 0
-        end
+    for k in keys(stab.suLim)
+        stab.suLim[k] = floor(param * stab.suLim[k])
     end
 
     return stab
