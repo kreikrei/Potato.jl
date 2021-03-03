@@ -66,7 +66,7 @@ function separate(Seq::S,record,R,θ)
 
     found = false
     for i in K(Seq.k).cover
-        v = find_separator(i,k,R,θ)
+        v = find_separator(i,F)
         key = S(Seq.k,β(i,v))
         if f(key,R,θ) > 0
             push!(record,key)
@@ -88,7 +88,7 @@ function fractional_column(Seq::S,R::Dict,θ)
     #find intersection of all fractional columns and columns in Seq
 end
 
-function find_separator(i::Int64,k::Int64,R::Dict,θ)
+function find_separator(i::Int64,F)
     #find the median of values encountered by u_i in fractional columns
 end
 
@@ -137,11 +137,11 @@ function buildSub!(n::node)
         end
 
         #VARIABLE DEFINITION
-        @variable(sp, u[K(k).cover] >= 0, Int)
-        @variable(sp, v[K(k).cover] >= 0, Int)
-        @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int)
-        @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin)
-        @variable(sp, x[K(k).cover, K(k).cover], Bin)
+        @variable(sp, u[K(k).cover] >= 0, Int) #peti diantar
+        @variable(sp, v[K(k).cover] >= 0, Int) #peti dijemput
+        @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int) #load kendaraan
+        @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin) #origin
+        @variable(sp, x[K(k).cover, K(k).cover], Bin) #penggunaan segmen
 
         @constraint(sp,
             sum(u[i] for i in K(k).cover) - sum(v[i] for i in K(k).cover) == 0
