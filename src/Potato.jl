@@ -39,6 +39,8 @@ export sub,getCols
 export colGen
 export origin
 export Q,s,f
+export rioritize!,branching_priority
+export prioritize_vehicle!,k_priority
 export separate
 
 end

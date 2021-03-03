@@ -3,10 +3,10 @@
 # =========================================================================
 
 passes(i) = [k for k in K() if (i in K(k).cover)]
-s(key,R,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
+s(key::S,R::Dict,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
 issinteger(val) = abs(round(val) - val) < 1e-8
 
-function Q(key,R) #key pasti adalah S
+function Q(key::S,R::Dict) #key pasti adalah S
     if isempty(key.seq)
         #if formnya S(k,β[])
         q = Vector{NamedTuple}()
@@ -31,11 +31,90 @@ function Q(key,R) #key pasti adalah S
     #column class extraction
 end
 
-function separate(R,θ)
-    #separation of fractional column
+const vehicle_priority = Ref{Any}(nothing)
+k_priority() = vehicle_priority[]
+
+function prioritize_vehicle!()
+    cov = DataFrame(k=Int64[],cov=Int64[])
+    for k in K()
+        append!(cov,DataFrame(k=k,cov=length(K(k).cover)))
+    end
+    sort!(cov,:cov,rev=true)
+
+    return vehicle_priority[] = cov.k
 end
 
-function f(key,R,θ)
+function find_branch(n::node)
+    R = Dict(1:length(n.columns) .=> n.columns)
+    θ = value.(master(n).obj_dict[:θ])
+    #iterate over k_priority()
+    for k in k_priority()
+        key = S(k,β[])
+        rec = separate(key,[],R,θ)
+        if !isempty(rec)
+            #select the last component with highest branching priority
+        end
+    end
+end
+
+function separate(Seq::S,record,R,θ)
+    F = fractional_column(Seq,R,θ) #eq has k and i_set
+
+    if isempty(F)
+        return record
+    end
+
+    found = false
+    for i in K(Seq.k).cover
+        v = find_separator(i,k,R,θ)
+        key = S(Seq.k,β(i,v))
+        if f(key,R,θ) > 0
+            push!(record,key)
+            found = true
+        end
+    end
+    if found
+        return record
+    end
+
+    i✶ = findmax(branching_priority(Seq.k).data)[2] #i and k axes ordered
+    v = find_separator(i✶,k,R,θ)
+    key = S(Seq.k,β(i✶,v))
+    record = separate(key,record,R,θ)
+    return record
+end
+
+function fractional_column(Seq::S,R::Dict,θ)
+    #find intersection of all fractional columns and columns in Seq
+end
+
+function find_separator(i::Int64,k::Int64,R::Dict,θ)
+    #find the median of values encountered by u_i in fractional columns
+end
+
+const priority = Ref{Any}(nothing)
+branching_priority() = priority[]
+branching_priority(k) = priority[][:,k] #bentuknya DenseAxisArray
+branching_priority(i,k) = priority[][i,k] #bentuknya DenseAxisArray
+
+function prioritize!()
+    #determine branching priorities
+    res = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
+    res .= 0
+    for i in V(), k in K()
+        if i in K(k).cover
+            slack = V(i).START - d(i) - V(i).MIN #after demand to min level
+            surplus = V(i).MAX - V(i).START - d(i) #after demand to max level
+            spare = min(slack,surplus)/(V(i).MAX - V(i).MIN)
+            res[i,k] = 1/abs(spare)
+        else
+            res[i,k] = 0
+        end
+    end
+    return priority[] = res
+end
+
+function f(key::S,R::Dict,θ)
     #find fractionality of key (S)
     return sum(θ[q.r,q.k] - floor(θ[q.r,q.k]) for q in Q(key,R))
 end
