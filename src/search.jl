@@ -35,7 +35,7 @@ function leaf(n::node,upperBound::Float64,maxiter::Float64)
         #CHECK AND PROCESS
         if u.status[end] == "UNVISITED"
             #PROCESS THE NODE
-            colGen(u;track=false,maxCG=Inf)
+            colGen(u;track=false,maxCG=10.0)
 
             #NODE STATUSES
             if u.status[end] == "INTEGER"
@@ -78,7 +78,13 @@ function createBranch(n::node)
         val = s(seeds,R,θ)
         println("branch on $seeds: $val")
 
-        for br in ["<=",">="]
+        if val < 0.5
+            signs = [">=","<="]
+        else
+            signs = ["<=",">="]
+        end
+
+        for br in signs
             push!(branches,
                 node(
                     n.self, #parent

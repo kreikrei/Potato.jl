@@ -11,6 +11,7 @@ include("struct.jl")
 include("settings.jl")
 include("base.jl")
 include("core.jl")
+include("search.jl")
 
 #struct
 export vtx,veh,col,node,dv,β,bound,S

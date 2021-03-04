@@ -76,7 +76,7 @@ function find_branch(R,θ)
     #iterate over k_priority()
     for k in k_priority()
         key = S(k,β[])
-        rec = separate(key,K(k).cover,[],R,θ)
+        rec = separate(key,deepcopy(K(k).cover),[],R,θ)
         if !isempty(rec) #rec is a vector of S
             lastcomp = [candidate.seq[end].i for candidate in rec]
             to_collect = findmax(i_priority(lastcomp))[2]
@@ -437,6 +437,7 @@ function colGen(n::node;maxCG::Float64,track::Bool)
             end
         else
             terminate = true #action
+            pop!(n.columns)
             push!(n.status,"EVALUATED") #report
             if track
                 println("EVALUATED")
