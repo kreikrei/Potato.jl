@@ -35,7 +35,7 @@ function leaf(n::node,upperBound::Float64,maxiter::Float64)
         #CHECK AND PROCESS
         if u.status[end] == "UNVISITED"
             #PROCESS THE NODE
-            colGen(u;track=false,maxCG=10.0)
+            colGen(u;track=false,maxCG=50.0)
 
             #NODE STATUSES
             if u.status[end] == "INTEGER"

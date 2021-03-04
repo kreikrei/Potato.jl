@@ -14,11 +14,15 @@ const vehicle_data = Ref{Any}(nothing)
 K() = sort!(collect(keys(vehicle_data[])))
 K(k) = vehicle_data[][k]
 
+const period_data = Ref{Any}(nothing)
+T() = period_data[]
+T(t) = period_data[][t]
+
 const demand_data = Ref{Any}(nothing)
 d() = demand_data[]
-d(i) = demand_data[][i]
+d(i,t) = demand_data[][i,t]
 
-function extract!(path::String;t::Int64,f::String) #extract from excel
+function extract!(path::String;f::String) #extract from excel
     xf = XLSX.readxlsx(path) #READ WORKSHEET
     data = Dict{Symbol,DataFrame}() #DATAFRAME DICT
 
@@ -58,24 +62,39 @@ function extract!(path::String;t::Int64,f::String) #extract from excel
         )
     end
 
+    T = collect( #range from starting month for duration
+        range(
+            last(data[:periods].start),
+            length = last(data[:periods].T),
+            step = 1
+        )
+    )
+
     d = JuMP.Containers.DenseAxisArray(
-        Array{Float64}(data[:demands][:,string.(t)]), #dataset
-        Array{Int64}(data[:demands].point)
-    ) #one dimension
+        Array{Float64}(data[:demands][:,string.(T)]), #dataset
+        Array{Int64}(data[:demands].point), #dims 1
+        T #dims 2
+    )
 
     vertex_data[] = V
     distance_data[] = dist
     vehicle_data[] = K
+    period_data[] = T
     demand_data[] = d
 
-    return V,dist,K,d
+    return V,dist,K,T,d
 end
 
 function initStab()
     slackCoeff = sl_C()
     surpCoeff = su_C()
-    slackLim = Dict(K() .=> [sum(K(k).BP[i] for i in K(k).cover) * K(k).Q for k in K()])
-    surpLim = Dict(K() .=> [sum(K(k).BP[i] for i in K(k).cover) * K(k).Q for k in K()])
+
+    slackLim = Dict{Tuple,Int64}()
+    surpLim = Dict{Tuple,Int64}()
+    for k in K(), t in T()
+        slackLim[(k,t)] = sum(K(k).BP[i] for i in K(k).cover) * K(k).Q
+        surpLim[(k,t)] = sum(K(k).BP[i] for i in K(k).cover) * K(k).Q
+    end
 
     return stabilizer(slackCoeff,surpCoeff,slackLim,surpLim)
 end

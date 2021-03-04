@@ -3,7 +3,7 @@
 # =========================================================================
 
 passes(i) = [k for k in K() if (i in K(k).cover)]
-s(key::S,R::Dict,θ) = sum(θ[q.r,q.k] for q in Q(key,R))
+s(key::S,R::Dict,θ) = sum(θ[q.r,q.k,q.t] for q in Q(key,R))
 issinteger(val) = abs(round(val) - val) < 1e-8
 
 function Q(key::S,R::Dict) #key pasti adalah S
@@ -11,7 +11,7 @@ function Q(key::S,R::Dict) #key pasti adalah S
         #if formnya S(k,β[])
         q = Vector{NamedTuple}()
         for r in keys(R)
-            push!(q,(r=r,k=key.k))
+            push!(q,(r=r,k=key.k,t=key.t))
         end
         return q
     else
@@ -20,8 +20,8 @@ function Q(key::S,R::Dict) #key pasti adalah S
         for tes in key.seq
             res = Vector{NamedTuple}()
             for r in keys(R)
-                if R[r][key.k].u[tes.i] >= tes.v
-                    push!(res,(r=r,k=key.k))
+                if R[r][key.k,key.t].u[tes.i] >= tes.v
+                    push!(res,(r=r,k=key.k,t=key.t))
                 end
             end
             push!(q,res) #add col each bound
@@ -42,8 +42,8 @@ function prioritize_vertex!()
     res = JuMP.Containers.DenseAxisArray{Float64}(undef,V())
     res .= 0
     for i in V()
-        slack = (V(i).START - d(i)) - V(i).MIN #after demand to min level
-        surplus = V(i).MAX - (V(i).START - d(i)) #after demand to max level
+        slack = (V(i).START - sum(d(i,t) for t in T())) - V(i).MIN #after demand
+        surplus = V(i).MAX - (V(i).START - sum(d(i,t) for t in T())) #after demand
         spare = min(slack,surplus)/(V(i).MAX - V(i).MIN)
         res[i] = 1/abs(spare)
     end
@@ -74,8 +74,15 @@ end
 
 function find_branch(R,θ)
     #iterate over k_priority()
-    for k in k_priority()
-        key = S(k,β[])
+    for k in k_priority(), t in T()
+        key = S(k,t,β[])
+        if !issinteger(s(key,R,θ))
+            return key
+        end
+    end
+
+    for k in k_priority(),t in T()
+        key = S(k,t,β[])
         rec = separate(key,deepcopy(K(k).cover),[],R,θ)
         if !isempty(rec) #rec is a vector of S
             lastcomp = [candidate.seq[end].i for candidate in rec]
@@ -96,7 +103,7 @@ function separate(Seq::S,cover,record,R,θ)
     found = false
     for i in cover
         v = find_separator(i,F,R)
-        newSeq = S(Seq.k,β[β(i,v)])
+        newSeq = S(Seq.k,Seq.t,β[β(i,v)])
         if !issinteger(s(newSeq,R,θ)) > 0
             push!(record,newSeq)
             found = true
@@ -109,7 +116,7 @@ function separate(Seq::S,cover,record,R,θ)
     i✶ = findmax(i_priority(cover))[2] #determine next highest priority
 
     v = find_separator(i✶,F,R)
-    newSeq = S(Seq.k,β[β(i✶,v)]) #BUILD NEWSEQ
+    newSeq = S(Seq.k,Seq.t,β[β(i✶,v)]) #BUILD NEWSEQ
 
     to_remove = findall(p -> p == i✶,cover)
     splice!(cover,to_remove) #BUILDNEWCOVER
@@ -120,9 +127,9 @@ end
 
 function fractional_column(Seq::S,R::Dict,θ)
     F = Vector{NamedTuple}()
-    for r in θ.axes[1], k in θ.axes[2]
-        if !issinteger(θ[r,k])
-            push!(F,(r=r,k=k))
+    for r in θ.axes[1], k in θ.axes[2], t in θ.axes[3]
+        if !issinteger(θ[r,k,t])
+            push!(F,(r=r,k=k,t=t))
         end
     end
 
@@ -132,7 +139,7 @@ end
 function find_separator(i::Int64,F,R)
     test = Vector{Int64}()
     for f in F
-        push!(test,R[f.r][f.k].u[i])
+        push!(test,R[f.r][(f.k,f.t)].u[i])
     end
     unique!(test)
 
@@ -140,17 +147,17 @@ function find_separator(i::Int64,F,R)
 end
 
 function f(key::S,R::Dict,θ)
-    return sum(θ[q.r,q.k] - floor(θ[q.r,q.k]) for q in Q(key,R))
+    return sum(θ[q.r,q.k,q.t] - floor(θ[q.r,q.k,q.t]) for q in Q(key,R))
 end
 
 const subproblems = Ref{Any}(nothing)
 callSub() = subproblems[]
-callSub(k) = subproblems[][k]
+callSub(k,t) = subproblems[][(k,t)]
 
 function buildSub!(n::node)
-    R = Dict{Int64,Model}()
+    R = Dict{Tuple,Model}()
 
-    @inbounds for k in K()
+    @inbounds for k in K(), t in T()
         sp = Model(get_optimizer())
         set_silent(sp)
 
@@ -182,8 +189,8 @@ function buildSub!(n::node)
         @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k, F) #k of S main di sini
-        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k, F) #k of S main di sini
+        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k && last(f).S.t == t, F)
+        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k && last(f).S.t == t, F)
 
         @variable(sp, g[keys(uB)], Bin)
         @variable(sp, h[keys(lB)], Bin)
@@ -206,7 +213,7 @@ function buildSub!(n::node)
 
         optimize!(sp)
 
-        R[k] = sp
+        R[(k,t)] = sp
     end
 
     subproblems[] = R
@@ -227,62 +234,68 @@ function master(n::node)
     # ================================
     #    MODEL CONSTRUCTION
     # ================================
-    @variable(mp, θ[keys(R), K()] >= 0)
-    @variable(mp, V(i).MIN <= I[i = V()] <= V(i).MAX)
-    @variable(mp, 0 <= slack[k = K(), i = K(k).cover] <= n.stab.slLim[k])
-    @variable(mp, 0 <= surp[k = K(), i = K(k).cover] <= n.stab.suLim[k])
+    @variable(mp, θ[keys(R), K(), T()] >= 0)
+    @variable(mp, I[i = V(), vcat(first(T()) - 1, T())])
+    @variable(mp, 0 <= slack[k = K(), t = T(), i = K(k).cover] <= n.stab.slLim[(k,t)])
+    @variable(mp, 0 <= surp[k = K(), t = T(), i = K(k).cover] <= n.stab.suLim[(k,t)])
 
     @objective(mp, Min,
         sum(
-            θ[r,k] * (
+            θ[r,k,t] * (
                 sum(
                     dist(i,j) * (
-                        K(k).vx * R[r][k].x[i,j] +
-                        K(k).vl * R[r][k].l[i,j]
+                        K(k).vx * R[r][(k,t)].x[i,j] +
+                        K(k).vl * R[r][(k,t)].l[i,j]
                     )
                     for i in K(k).cover, j in K(k).cover
                 ) +
                 sum(
-                    K(k).fd * R[r][k].u[i]
+                    K(k).fd * R[r][(k,t)].u[i]
                     for i in K(k).cover
                 ) +
                 sum(
-                    K(k).fp * R[r][k].o[i]
+                    K(k).fp * R[r][(k,t)].o[i]
                     for i in K(k).cover
                 )
             )
-            for r in keys(R), k in K()
+            for r in keys(R), k in K(), t in T()
         ) + #column costs
         sum(
-            V(i).h * I[i]
-            for i in V()
+            V(i).h * I[i,t]
+            for i in V(), t in T()
         ) + #inventory costs
         sum(
-            n.stab.slCoeff * slack[k,i]
-            for k in K(), i in K(k).cover
+            n.stab.slCoeff * slack[k,t,i]
+            for k in K(), t in T(), i in K(k).cover
         ) - #stabilizer
         sum(
-            n.stab.suCoeff * surp[k,i]
-            for k in K(), i in K(k).cover
+            n.stab.suCoeff * surp[k,t,i]
+            for k in K(), t in T(), i in K(k).cover
         ) #stabilizer
     )
 
-    @constraint(mp, λ[i = V()],
-        V(i).START +
-        sum(R[r][k].u[i] * θ[r,k] for r in keys(R), k in passes(i)) +
-        sum(slack[k,i] for k in passes(i))  ==
-        sum(R[r][k].v[i] * θ[r,k] for r in keys(R), k in passes(i)) +
-        sum(surp[k,i] for k in passes(i)) +
-        d(i) + I[i]
+    @constraint(mp, λ[i = V(), t = T()],
+        I[i,t-1] + sum(R[r][(k,t)].u[i] * θ[r,k,t] for r in keys(R), k in passes(i)) +
+        sum(slack[k,t,i] for k in passes(i))  ==
+        sum(R[r][(k,t)].v[i] * θ[r,k,t] for r in keys(R), k in passes(i)) +
+        sum(surp[k,t,i] for k in passes(i)) + d(i,t) + I[i,t]
     ) #inventory balance
 
-    @constraint(mp, δ[k = K(), i = K(k).cover],
-        sum(R[r][k].o[i] * θ[r,k] for r in keys(R)) <= K(k).BP[i]
+    @constraint(mp, δ[k = K(), t = T(), i = K(k).cover],
+        sum(R[r][(k,t)].o[i] * θ[r,k,t] for r in keys(R)) <= K(k).BP[i]
     ) #limit starting point
 
-    @constraint(mp, ϵ[k = K()],
-        sum(θ[r,k] for r in keys(R)) <= sum(K(k).BP[i] for i in K(k).cover)
+    @constraint(mp, ϵ[k = K(), t = T()],
+        sum(θ[r,k,t] for r in keys(R)) <= sum(K(k).BP[i] for i in K(k).cover)
     ) #multiplicity
+
+    @constraint(mp, [i = V(), t = T()],
+        V(i).MIN <= I[i,t] <= V(i).MAX
+    ) #inventory max min
+
+    @constraint(mp, [i = V()],
+        I[i,first(T())-1] == V(i).START
+    ) #inventory start
 
     F = Dict(1:length(n.bounds) .=> n.bounds)
     uB = filter(f -> last(f).sense == "<=",F)
@@ -308,12 +321,12 @@ function getDuals(mp::Model)
 end
 
 function sub(n::node,duals::dv)
-    @inbounds for k in K()
-        sp = callSub()[k]
+    @inbounds for k in K(), t in T()
+        sp = callSub(k,t)
 
         F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k, F) #k of S main di sini
-        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k, F) #k of S main di sini
+        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k && last(f).S.t == t, F)
+        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k && last(f).S.t == t, F)
 
         #ADD OBJECTIVE
         @objective(sp, Min,
@@ -327,11 +340,11 @@ function sub(n::node,duals::dv)
             sum(K(k).fd * sp.obj_dict[:u][i] for i in K(k).cover) +
             sum(K(k).fp * sp.obj_dict[:o][i] for i in K(k).cover) -
             sum(
-                (sp.obj_dict[:u][i] - sp.obj_dict[:v][i]) * duals.λ[i]
+                (sp.obj_dict[:u][i] - sp.obj_dict[:v][i]) * duals.λ[i,t]
                 for i in K(k).cover
             ) -
-            sum(sp.obj_dict[:o][i] * duals.δ[k,i] for i in K(k).cover) -
-            duals.ϵ[k] -
+            sum(sp.obj_dict[:o][i] * duals.δ[k,t,i] for i in K(k).cover) -
+            duals.ϵ[k,t] -
             sum(sp.obj_dict[:g][j] * duals.ρ[j] for j in keys(uB)) -
             sum(sp.obj_dict[:h][j] * duals.σ[j] for j in keys(lB))
         )
@@ -353,7 +366,7 @@ function getCols(sp)
 
         return col(u,v,l,o,x)
     elseif isa(sp,Dict)
-        new = Dict{Int64,col}()
+        new = Dict{Tuple,col}()
         for r in keys(sp)
             new[r] = getCols(sp[r])
         end
@@ -364,19 +377,19 @@ end
 
 function colvals()
     collection = 0
-    for k in K()
-        collection += objective_value(callSub(k))
+    for k in K(), t in T()
+        collection += objective_value(callSub(k,t))
     end
 
     return sum(collection)
 end
 
 function updateStab!(stab::stabilizer,param::Float64)
-    for k in keys(stab.slLim)
-        stab.slLim[k] = floor(param * stab.slLim[k])
+    for kt in keys(stab.slLim)
+        stab.slLim[kt] = floor(param * stab.slLim[kt])
     end
-    for k in keys(stab.suLim)
-        stab.suLim[k] = floor(param * stab.suLim[k])
+    for kt in keys(stab.suLim)
+        stab.suLim[kt] = floor(param * stab.suLim[kt])
     end
 
     return stab
@@ -413,7 +426,7 @@ function colGen(n::node;maxCG::Float64,track::Bool)
                             println("EVALUATED")
                         end
                     else
-                        updateStab!(n.stab,0.5) #action
+                        updateStab!(n.stab,0.2) #action
                         push!(n.status,"STABILIZED") #report
                         if track
                             println("STABILIZED")
@@ -438,6 +451,7 @@ function colGen(n::node;maxCG::Float64,track::Bool)
         else
             terminate = true #action
             pop!(n.columns)
+            updateStab!(n.stab,1e-8)
             push!(n.status,"EVALUATED") #report
             if track
                 println("EVALUATED")
@@ -460,11 +474,11 @@ function colGen(n::node;maxCG::Float64,track::Bool)
 end
 
 function origin(n::node)
-    o = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
-    u = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
-    v = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K())
-    x = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K())
-    l = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K())
+    o = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+    u = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+    v = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+    x = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K(),T())
+    l = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K(),T())
 
     o .= 0
     u .= 0
@@ -475,15 +489,15 @@ function origin(n::node)
     R = Dict(1:length(n.columns) .=> n.columns)
     θ = value.(master(n).obj_dict[:θ])
 
-    for k in K(), i in K(k).cover
-        o[i,k] = sum(R[r][k].o[i] * θ[r,k] for r in keys(R))
-        u[i,k] = sum(R[r][k].u[i] * θ[r,k] for r in keys(R))
-        v[i,k] = sum(R[r][k].v[i] * θ[r,k] for r in keys(R))
+    for k in K(), t in T(), i in K(k).cover
+        o[i,k,t] = sum(R[r][(k,t)].o[i] * θ[r,k,t] for r in keys(R))
+        u[i,k,t] = sum(R[r][(k,t)].u[i] * θ[r,k,t] for r in keys(R))
+        v[i,k,t] = sum(R[r][(k,t)].v[i] * θ[r,k,t] for r in keys(R))
     end
 
-    for k in K(), i in K(k).cover, j in K(k).cover
-        x[i,j,k] = sum(R[r][k].x[i,j] * θ[r,k] for r in keys(R))
-        l[i,j,k] = sum(R[r][k].l[i,j] * θ[r,k] for r in keys(R))
+    for k in K(), t in T(), i in K(k).cover, j in K(k).cover
+        x[i,j,k,t] = sum(R[r][(k,t)].x[i,j] * θ[r,k,t] for r in keys(R))
+        l[i,j,k,t] = sum(R[r][(k,t)].l[i,j] * θ[r,k,t] for r in keys(R))
     end
 
     return col(u,v,l,o,x)

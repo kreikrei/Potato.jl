@@ -64,6 +64,7 @@ end
 
 struct S
     k::Int64
+    t::Int64
     seq::Vector{β}
 end
 
