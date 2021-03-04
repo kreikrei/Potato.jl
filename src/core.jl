@@ -139,7 +139,7 @@ end
 function find_separator(i::Int64,F,R)
     test = Vector{Int64}()
     for f in F
-        push!(test,R[f.r][(f.k,f.t)].u[i])
+        push!(test,round(R[f.r][(f.k,f.t)].u[i]))
     end
     unique!(test)
 
