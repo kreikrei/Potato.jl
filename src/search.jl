@@ -78,7 +78,7 @@ function createBranch(n::node)
         val = s(seeds,R,θ)
         println("branch on $seeds: $val")
 
-        if val < 0.5
+        if val - floor(val) < 0.5
             signs = [">=","<="]
         else
             signs = ["<=",">="]
