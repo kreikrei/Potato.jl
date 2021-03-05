@@ -157,66 +157,72 @@ callSub(k,t) = subproblems[][(k,t)]
 function buildSub!(n::node)
     R = Dict{Tuple,Model}()
 
-    @inbounds for k in K(), t in T()
-        sp = Model(get_optimizer())
-        set_silent(sp)
+    @sync begin
+        @inbounds for k in K(), t in T()
+            @async begin
+                sp = Model(get_optimizer())
+                set_silent(sp)
 
-        if solver_name(sp) == "Gurobi"
-            set_optimizer_attribute(sp,"MIPFocus",2)
-            set_optimizer_attribute(sp,"NodefileStart",0.5)
-            set_optimizer_attribute(sp, "NumericFocus",3)
+                if solver_name(sp) == "Gurobi"
+                    set_optimizer_attribute(sp,"MIPFocus",2)
+                    set_optimizer_attribute(sp,"NodefileStart",0.5)
+                    set_optimizer_attribute(sp, "NumericFocus",3)
+                end
+
+                #VARIABLE DEFINITION
+                @variable(sp, u[K(k).cover] >= 0, Int) #peti diantar
+                @variable(sp, v[K(k).cover] >= 0, Int) #peti dijemput
+                @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int) #load kendaraan
+                @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin) #origin
+                @variable(sp, x[K(k).cover, K(k).cover], Bin) #penggunaan segmen
+
+                @constraint(sp,
+                    sum(u[i] for i in K(k).cover) - sum(v[i] for i in K(k).cover) == 0
+                ) #all pickup delivered
+                @constraint(sp, [i = K(k).cover],
+                    sum(l[j,i] for j in K(k).cover) - sum(l[i,j] for j in K(k).cover) ==
+                    u[i] - v[i]
+                ) #load balance
+                @constraint(sp,
+                    [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]
+                ) #XL
+                @constraint(sp, [i = K(k).cover],
+                    sum(x[j,i] for j in K(k).cover) - sum(x[i,j] for j in K(k).cover) == 0
+                ) #traversal
+                @constraint(sp, [i = K(k).cover], v[i] <= K(k).Q * o[i]) #VZ
+                @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
+
+                F = Dict(1:length(n.bounds) .=> n.bounds)
+                uB = filter(f -> last(f).sense=="<="&&last(f).S.k==k && last(f).S.t == t, F)
+                lB = filter(f -> last(f).sense==">="&&last(f).S.k==k && last(f).S.t == t, F)
+
+                @variable(sp, g[keys(uB)], Bin)
+                @variable(sp, h[keys(lB)], Bin)
+
+                q = col(u,v,l,o,x)
+
+                for j in keys(uB)
+                    η = @variable(sp, [F[j].S.seq], Bin)
+                    @constraint(sp, g[j] >= 1 - sum((1 - η[e]) for e in F[j].S.seq))
+                    @constraint(sp, [e = F[j].S.seq],
+                    (K(k).Q - e.v + 1) * η[e] >= getproperty(q,:u)[e.i] - e.v + 1)
+                end
+
+                for j in keys(lB)
+                    η = @variable(sp, [F[j].S.seq], Bin)
+                    @constraint(sp, [e = F[j].S.seq], h[j] <= η[e])
+                    @constraint(sp, [e = F[j].S.seq],
+                    e.v * η[e] <= getproperty(q,:u)[e.i])
+                end
+
+                optimize!(sp)
+
+                R[(k,t)] = sp
+            end
         end
-
-        #VARIABLE DEFINITION
-        @variable(sp, u[K(k).cover] >= 0, Int) #peti diantar
-        @variable(sp, v[K(k).cover] >= 0, Int) #peti dijemput
-        @variable(sp, l[K(k).cover, K(k).cover] >= 0, Int) #load kendaraan
-        @variable(sp, o[i = K(k).cover] <= K(k).BP[i], Bin) #origin
-        @variable(sp, x[K(k).cover, K(k).cover], Bin) #penggunaan segmen
-
-        @constraint(sp,
-            sum(u[i] for i in K(k).cover) - sum(v[i] for i in K(k).cover) == 0
-        ) #all pickup delivered
-        @constraint(sp, [i = K(k).cover],
-            sum(l[j,i] for j in K(k).cover) - sum(l[i,j] for j in K(k).cover) ==
-            u[i] - v[i]
-        ) #load balance
-        @constraint(sp, [i = K(k).cover, j = K(k).cover], l[i,j] <= K(k).Q * x[i,j]) #XL
-        @constraint(sp, [i = K(k).cover],
-            sum(x[j,i] for j in K(k).cover) - sum(x[i,j] for j in K(k).cover) == 0
-        ) #traversal
-        @constraint(sp, [i = K(k).cover], v[i] <= K(k).Q * o[i]) #VZ
-        @constraint(sp, sum(o[i] for i in K(k).cover) <= 1) #one start
-
-        F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k && last(f).S.t == t, F)
-        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k && last(f).S.t == t, F)
-
-        @variable(sp, g[keys(uB)], Bin)
-        @variable(sp, h[keys(lB)], Bin)
-
-        q = col(u,v,l,o,x)
-
-        for j in keys(uB)
-            η = @variable(sp, [F[j].S.seq], Bin)
-            @constraint(sp, g[j] >= 1 - sum((1 - η[e]) for e in F[j].S.seq))
-            @constraint(sp, [e = F[j].S.seq],
-            (K(k).Q - e.v + 1) * η[e] >= getproperty(q,:u)[e.i] - e.v + 1)
-        end
-
-        for j in keys(lB)
-            η = @variable(sp, [F[j].S.seq], Bin)
-            @constraint(sp, [e = F[j].S.seq], h[j] <= η[e])
-            @constraint(sp, [e = F[j].S.seq],
-            e.v * η[e] <= getproperty(q,:u)[e.i])
-        end
-
-        optimize!(sp)
-
-        R[(k,t)] = sp
     end
 
-    subproblems[] = R
+    return subproblems[] = R
 end
 
 function master(n::node)
@@ -321,36 +327,40 @@ function getDuals(mp::Model)
 end
 
 function sub(n::node,duals::dv)
-    @inbounds for k in K(), t in T()
-        sp = callSub(k,t)
+    @sync begin
+        @inbounds for k in K(), t in T()
+            @async begin
+                sp = callSub(k,t)
 
-        F = Dict(1:length(n.bounds) .=> n.bounds)
-        uB = filter(f -> last(f).sense == "<=" && last(f).S.k == k && last(f).S.t == t, F)
-        lB = filter(f -> last(f).sense == ">=" && last(f).S.k == k && last(f).S.t == t, F)
+                F = Dict(1:length(n.bounds) .=> n.bounds)
+                uB = filter(f->last(f).sense == "<="&&last(f).S.k == k&&last(f).S.t == t, F)
+                lB = filter(f->last(f).sense == ">="&&last(f).S.k == k&&last(f).S.t == t, F)
 
-        #ADD OBJECTIVE
-        @objective(sp, Min,
-            sum(
-                dist(i,j) * (
-                    K(k).vx * sp.obj_dict[:x][i,j] +
-                    K(k).vl * sp.obj_dict[:l][i,j]
+                #ADD OBJECTIVE
+                @objective(sp, Min,
+                    sum(
+                        dist(i,j) * (
+                            K(k).vx * sp.obj_dict[:x][i,j] +
+                            K(k).vl * sp.obj_dict[:l][i,j]
+                        )
+                        for i in K(k).cover, j in K(k).cover
+                    ) +
+                    sum(K(k).fd * sp.obj_dict[:u][i] for i in K(k).cover) +
+                    sum(K(k).fp * sp.obj_dict[:o][i] for i in K(k).cover) -
+                    sum(
+                        (sp.obj_dict[:u][i] - sp.obj_dict[:v][i]) * duals.λ[i,t]
+                        for i in K(k).cover
+                    ) -
+                    sum(sp.obj_dict[:o][i] * duals.δ[k,t,i] for i in K(k).cover) -
+                    duals.ϵ[k,t] -
+                    sum(sp.obj_dict[:g][j] * duals.ρ[j] for j in keys(uB)) -
+                    sum(sp.obj_dict[:h][j] * duals.σ[j] for j in keys(lB))
                 )
-                for i in K(k).cover, j in K(k).cover
-            ) +
-            sum(K(k).fd * sp.obj_dict[:u][i] for i in K(k).cover) +
-            sum(K(k).fp * sp.obj_dict[:o][i] for i in K(k).cover) -
-            sum(
-                (sp.obj_dict[:u][i] - sp.obj_dict[:v][i]) * duals.λ[i,t]
-                for i in K(k).cover
-            ) -
-            sum(sp.obj_dict[:o][i] * duals.δ[k,t,i] for i in K(k).cover) -
-            duals.ϵ[k,t] -
-            sum(sp.obj_dict[:g][j] * duals.ρ[j] for j in keys(uB)) -
-            sum(sp.obj_dict[:h][j] * duals.σ[j] for j in keys(lB))
-        )
 
-        optimize!(sp)
-        #println("($k): $(objective_value(sp))")
+                optimize!(sp)
+                #println("($k): $(objective_value(sp))")
+            end
+        end
     end
 
     return callSub()
