@@ -159,7 +159,7 @@ function buildSub!(n::node)
 
     @sync begin
         @inbounds for k in K(), t in T()
-            Threads.@spawn begin
+            @async begin
                 sp = Model(get_optimizer())
                 set_silent(sp)
 
@@ -329,7 +329,7 @@ end
 function sub(n::node,duals::dv)
     @sync begin
         @inbounds for k in K(), t in T()
-            Threads.@spawn begin
+            @async begin
                 sp = callSub(k,t)
 
                 F = Dict(1:length(n.bounds) .=> n.bounds)
