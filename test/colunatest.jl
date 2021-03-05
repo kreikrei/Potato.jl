@@ -18,14 +18,14 @@ prioritize_vertex!()
 prioritize_vehicle!()
 
 test_root = root()
-
 #=test_master = master(test_root)
 println(test_master)
 test_duals = getDuals(test_master)
-test_sub = sub(test_root,test_duals)
-test_cols = getCols(test_sub)
+@time test_sub = sub(test_root,test_duals)
+@time test_cols = getCols(test_sub)
 
 push!(test_root.columns,test_cols)=#
+
 @time colGen(test_root,maxCG=Inf,track=true)
 
 origin(test_root)

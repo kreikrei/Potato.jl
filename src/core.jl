@@ -157,17 +157,23 @@ callSub(k,t) = subproblems[][(k,t)]
 function buildSub!(n::node)
     R = Dict{Tuple,Model}()
 
+    for k in K(), t in T()
+        sp = Model(get_optimizer())
+        set_silent(sp)
+
+        if solver_name(sp) == "Gurobi"
+            set_optimizer_attribute(sp,"MIPFocus",2)
+            set_optimizer_attribute(sp,"NodefileStart",0.5)
+            set_optimizer_attribute(sp, "NumericFocus",3)
+        end
+
+        R[(k,t)] = sp
+    end
+
     @sync begin
         @inbounds for k in K(), t in T()
-            @async begin
-                sp = Model(get_optimizer())
-                set_silent(sp)
-
-                if solver_name(sp) == "Gurobi"
-                    set_optimizer_attribute(sp,"MIPFocus",2)
-                    set_optimizer_attribute(sp,"NodefileStart",0.5)
-                    set_optimizer_attribute(sp, "NumericFocus",3)
-                end
+            Threads.@spawn begin
+                sp = R[(k,t)]
 
                 #VARIABLE DEFINITION
                 @variable(sp, u[K(k).cover] >= 0, Int) #peti diantar
@@ -216,8 +222,6 @@ function buildSub!(n::node)
                 end
 
                 optimize!(sp)
-
-                R[(k,t)] = sp
             end
         end
     end
@@ -329,7 +333,7 @@ end
 function sub(n::node,duals::dv)
     @sync begin
         @inbounds for k in K(), t in T()
-            @async begin
+            Threads.@spawn begin
                 sp = callSub(k,t)
 
                 F = Dict(1:length(n.bounds) .=> n.bounds)
