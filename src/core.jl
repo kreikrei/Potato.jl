@@ -163,6 +163,7 @@ function buildSub!(n::node)
 
         if solver_name(sp) == "Gurobi"
             set_optimizer_attribute(sp,"MIPFocus",2)
+            set_optimizer_attribute(sp,"Threads",1)
             set_optimizer_attribute(sp,"NodefileStart",0.5)
             set_optimizer_attribute(sp, "NumericFocus",3)
         end
