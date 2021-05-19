@@ -6,7 +6,7 @@ using Potato
 path = joinpath(@__DIR__,"abs1n20.xlsx")
 extract!(path;f="euclidean")
 
-path = joinpath(DEPOT_PATH[1],"dev","Potato\\test\\A1.xlsx")
+path = joinpath(DEPOT_PATH[1],"dev","Potato\\test\\B.xlsx")
 extract!(path;f="haversine")
 
 GUROBI_ENV = Gurobi.Env()
@@ -19,20 +19,54 @@ prioritize_vehicle!()
 
 Threads.nthreads()
 test_root = root()
-#=@time buildSub!(test_root)
+@time buildSub!(test_root)
 test_master = master(test_root)
 test_duals = getDuals(test_master)
 @time test_sub = sub(test_root,test_duals)
 @time test_cols = getCols(test_sub)
 
-push!(test_root.columns,test_cols)=#
+push!(test_root.columns,test_cols)
 
 @time colGen(test_root,maxCG=Inf,track=true)
 
-origin(test_root)
+ori = origin(test_root)
+
+println(ori.v[:,82,1])
+
 
 R = Dict(1:length(test_root.columns) .=> test_root.columns)
 θ = value.(master(test_root).obj_dict[:θ])
+
+rounded = round.(θ)
+
+o = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+u = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+v = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),K(),T())
+x = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K(),T())
+l = JuMP.Containers.DenseAxisArray{Float64}(undef,V(),V(),K(),T())
+
+o .= 0
+u .= 0
+v .= 0
+l .= 0
+x .= 0
+
+for k in K(), t in T(), i in K(k).cover
+    o[i,k,t] = sum(R[r][(k,t)].o[i] * rounded[r,k,t] for r in keys(R))
+    u[i,k,t] = sum(R[r][(k,t)].u[i] * rounded[r,k,t] for r in keys(R))
+    v[i,k,t] = sum(R[r][(k,t)].v[i] * rounded[r,k,t] for r in keys(R))
+end
+
+for k in K(), t in T(), i in K(k).cover, j in K(k).cover
+    x[i,j,k,t] = sum(R[r][(k,t)].x[i,j] * rounded[r,k,t] for r in keys(R))
+    l[i,j,k,t] = sum(R[r][(k,t)].l[i,j] * rounded[r,k,t] for r in keys(R))
+end
+
+tes = col(u,v,l,o,x)
+
+
+
+
 new = find_branch(R,θ)
 println(new)
 s(new,R,θ)
